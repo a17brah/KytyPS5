@@ -159,10 +159,16 @@ uint32_t LoadImageDescriptor(EmitterState& state, uint32_t resource, uint32_t mi
 	state.builder.AddFunction(spv::OpLoad, ImageType(state, state.program.info.images.at(resource)),
 	                          image, pointer);
 	if (array_index != 0u) {
+		const auto& image_resource = state.program.info.images.at(resource);
 		state.builder.RequireExtension("SPV_EXT_descriptor_indexing");
 		state.builder.RequireCapability(spv::CapabilityShaderNonUniform);
-		state.builder.RequireCapability(spv::CapabilitySampledImageArrayNonUniformIndexing);
-		state.builder.RequireCapability(spv::CapabilitySampledImageArrayDynamicIndexing);
+		if (image_resource.resource_class == IR::ImageResourceClass::Storage) {
+			state.builder.RequireCapability(spv::CapabilityStorageImageArrayNonUniformIndexing);
+			state.builder.RequireCapability(spv::CapabilityStorageImageArrayDynamicIndexing);
+		} else {
+			state.builder.RequireCapability(spv::CapabilitySampledImageArrayNonUniformIndexing);
+			state.builder.RequireCapability(spv::CapabilitySampledImageArrayDynamicIndexing);
+		}
 		state.builder.AddAnnotation(spv::OpDecorate, image, spv::DecorationNonUniform);
 		state.builder.AddAnnotation(spv::OpDecorate, pointer, spv::DecorationNonUniform);
 		state.builder.AddAnnotation(spv::OpDecorate, array_index, spv::DecorationNonUniform);
