@@ -488,8 +488,8 @@ TextureCache::ImageIds TextureCache::FindImagesInRegion(uint64_t address, uint64
 
 ImageId TextureCache::GetNullImage(const ImageDesc& desc) {
 	const auto key = (static_cast<uint64_t>(desc.info.pixel_format) << 32) |
-	                 (static_cast<uint64_t>(desc.info.type) << 16) |
-	                 static_cast<uint64_t>(desc.info.resources.layers);
+	                 ((static_cast<uint64_t>(desc.info.type) & 0xffffu) << 16) |
+	                 static_cast<uint64_t>(desc.info.resources.layers & 0xffffu);
 	if (const auto found = m_null_images.find(key); found != m_null_images.end()) {
 		return found->second;
 	}

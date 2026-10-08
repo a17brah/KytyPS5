@@ -394,7 +394,9 @@ static TextureCache::ImageDesc NullTextureDesc(const ShaderRecompiler::IR::Image
 		case ShaderRecompiler::Decoder::ImageDimension::Dim2DArray:
 		case ShaderRecompiler::Decoder::ImageDimension::Dim2DMsaaArray:
 			desc.info.type             = Prospero::ImageType::kColor2D;
-			desc.view_info.type        = vk::ImageViewType::e2DArray;
+			desc.view_info.type        = resource.cube && binding != TextureCache::BindingType::Storage
+			                               ? vk::ImageViewType::eCubeArray
+			                               : vk::ImageViewType::e2DArray;
 			desc.info.resources.layers = resource.cube ? 6u : 1u;
 			desc.view_info.layer_count = resource.cube ? 6u : 1u;
 			break;
@@ -402,8 +404,11 @@ static TextureCache::ImageDesc NullTextureDesc(const ShaderRecompiler::IR::Image
 		case ShaderRecompiler::Decoder::ImageDimension::Dim2DMsaa:
 		default:
 			desc.info.type             = Prospero::ImageType::kColor2D;
-			desc.view_info.type        = resource.cube ? vk::ImageViewType::e2DArray
-			                                           : vk::ImageViewType::e2D;
+			desc.view_info.type        = resource.cube
+			                               ? (binding == TextureCache::BindingType::Storage
+			                                      ? vk::ImageViewType::e2DArray
+			                                      : vk::ImageViewType::eCube)
+			                               : vk::ImageViewType::e2D;
 			desc.info.resources.layers = resource.cube ? 6u : 1u;
 			desc.view_info.layer_count = resource.cube ? 6u : 1u;
 			break;
