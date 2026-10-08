@@ -160,7 +160,8 @@ void Presenter::Frame::Configure(GraphicContext& graphics, vk::Extent2D extent, 
 
 	const auto features = graphics.GetFormatProperties(format).optimalTilingFeatures;
 	const auto required =
-	    vk::FormatFeatureFlagBits::eBlitSrc | vk::FormatFeatureFlagBits::eSampledImageFilterLinear |
+	    vk::FormatFeatureFlagBits::eBlitSrc | vk::FormatFeatureFlagBits::eBlitDst |
+	    vk::FormatFeatureFlagBits::eSampledImageFilterLinear |
 	    vk::FormatFeatureFlagBits::eSampledImage | vk::FormatFeatureFlagBits::eTransferSrc |
 	    vk::FormatFeatureFlagBits::eTransferDst;
 	if ((features & required) != required) {
@@ -234,6 +235,10 @@ void Presenter::Frame::CopyFrom(CommandBuffer& command_buffer, Image& source) {
 	source.Transit(vk::ImageLayout::eTransferSrcOptimal, vk::AccessFlagBits2::eTransferRead, {},
 	               command);
 	Transit(command, vk::ImageLayout::eTransferDstOptimal, vk::AccessFlagBits2::eTransferWrite);
+	if (source.backing.extent.width == 0 || source.backing.extent.height == 0 ||
+	    image.extent.width == 0 || image.extent.height == 0) {
+		return;
+	}
 	const bool same_format = (source.backing.format == image.format) ||
 	                         (source.backing.format == vk::Format::eB8G8R8A8Srgb &&
 	                          image.format == vk::Format::eB8G8R8A8Unorm) ||
@@ -241,25 +246,25 @@ void Presenter::Frame::CopyFrom(CommandBuffer& command_buffer, Image& source) {
 	                          image.format == vk::Format::eR8G8B8A8Unorm);
 	const bool same_extent = (source.backing.extent.width == image.extent.width) &&
 	                         (source.backing.extent.height == image.extent.height);
+	const uint32_t layers = std::min(source.backing.layers, image.layers);
 	if (same_format && same_extent) {
 		vk::ImageCopy copy {};
-		copy.srcSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, source.backing.layers};
-		copy.dstSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, image.layers};
+		copy.srcSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, layers};
+		copy.dstSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, layers};
 		copy.extent         = {image.extent.width, image.extent.height, 1};
-		EXIT_IF(copy.srcSubresource.layerCount != copy.dstSubresource.layerCount);
 		command.copyImage(source.backing.image, vk::ImageLayout::eTransferSrcOptimal, image.image,
 		                  vk::ImageLayout::eTransferDstOptimal, copy);
 	} else {
 		vk::ImageBlit blit {};
-		blit.srcSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, source.backing.layers};
+		blit.srcSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, layers};
 		blit.srcOffsets[1]  = {static_cast<int>(source.backing.extent.width),
 		                       static_cast<int>(source.backing.extent.height), 1};
-		blit.dstSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, image.layers};
+		blit.dstSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, layers};
 		blit.dstOffsets[1]  = {static_cast<int>(image.extent.width),
 		                       static_cast<int>(image.extent.height), 1};
-		EXIT_IF(blit.srcSubresource.layerCount != blit.dstSubresource.layerCount);
+		const auto filter = same_extent ? vk::Filter::eNearest : vk::Filter::eLinear;
 		command.blitImage(source.backing.image, vk::ImageLayout::eTransferSrcOptimal, image.image,
-		                  vk::ImageLayout::eTransferDstOptimal, 1, &blit, vk::Filter::eLinear);
+		                  vk::ImageLayout::eTransferDstOptimal, 1, &blit, filter);
 	}
 }
 
@@ -890,20 +895,28 @@ Presenter::~Presenter() = default;
 Presenter::Frame& Presenter::PrepareFrame(CommandBuffer& buffer, const ImageInfo& info) {
 	KYTY_PROFILER_FUNCTION();
 	EXIT_IF(buffer.IsInvalid());
-	Common::LockGuard render_lock(m_impl->renderer.GetMutex());
-	auto&             image = m_impl->ResolveSurface(info);
-	if (image.backing.format == vk::Format::eUndefined) {
-		EXIT("unsupported presentation source, image=%p\n", static_cast<const void*>(&image));
-	}
-	auto frame_format = image.backing.format != vk::Format::eUndefined ? image.backing.format : info.pixel_format;
+	auto frame_format = info.pixel_format;
 	switch (frame_format) {
 		case vk::Format::eR8G8B8A8Srgb: frame_format = vk::Format::eR8G8B8A8Unorm; break;
 		case vk::Format::eB8G8R8A8Srgb: frame_format = vk::Format::eB8G8R8A8Unorm; break;
 		default: break;
 	}
+	auto* frame = m_impl->frames.Acquire({info.extent.width, info.extent.height}, frame_format);
+	Common::LockGuard render_lock(m_impl->renderer.GetMutex());
+	auto&             image = m_impl->ResolveSurface(info);
+	if (image.backing.format == vk::Format::eUndefined) {
+		EXIT("unsupported presentation source, image=%p\n", static_cast<const void*>(&image));
+	}
+	if (image.backing.format != vk::Format::eUndefined) {
+		frame_format = image.backing.format;
+		switch (frame_format) {
+			case vk::Format::eR8G8B8A8Srgb: frame_format = vk::Format::eR8G8B8A8Unorm; break;
+			case vk::Format::eB8G8R8A8Srgb: frame_format = vk::Format::eB8G8R8A8Unorm; break;
+			default: break;
+		}
+	}
 	const auto width  = image.backing.extent.width != 0 ? image.backing.extent.width : info.extent.width;
 	const auto height = image.backing.extent.height != 0 ? image.backing.extent.height : info.extent.height;
-	auto* frame = m_impl->frames.Acquire({width, height}, frame_format);
 	frame->Configure(m_impl->window.graphic_ctx, {width, height}, frame_format);
 	frame->CopyFrom(buffer, image);
 	return *frame;
