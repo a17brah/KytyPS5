@@ -483,7 +483,8 @@ std::pair<Buffer*, uint64_t> BufferCache::ObtainBuffer(uint64_t vaddr, uint64_t 
 	    !m_memory_tracker.IsRegionGpuModified(vaddr, size) &&
 	    m_memory_tracker.IsRegionCpuModified(vaddr, size)) {
 		const auto alignment = std::max<uint64_t>(
-		    m_graphics.physical_device_properties.limits.minUniformBufferOffsetAlignment, 1);
+		    {m_graphics.physical_device_properties.limits.minUniformBufferOffsetAlignment,
+		     m_graphics.physical_device_properties.limits.minStorageBufferOffsetAlignment, 1ULL});
 		auto [mapped, offset] = m_stream_buffer.Map(size, alignment, false);
 		if (mapped != nullptr) {
 			std::memcpy(mapped, reinterpret_cast<const void*>(vaddr), size);
